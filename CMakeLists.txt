@@ -1,0 +1,53 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(zerosee VERSION 0.2.0 LANGUAGES CXX)
+
+find_package(Threads REQUIRED)
+find_package(CURL 7.85 REQUIRED)
+find_package(nlohmann_json 3.10 REQUIRED)
+add_library(zerosee_web src/web_url.cpp src/web_http.cpp src/web_analysis.cpp src/web_report.cpp)
+target_include_directories(zerosee_web PUBLIC src)
+target_compile_features(zerosee_web PUBLIC cxx_std_20)
+target_compile_definitions(zerosee_web PUBLIC ZEROSEE_VERSION="${PROJECT_VERSION}")
+target_link_libraries(zerosee_web PUBLIC CURL::libcurl nlohmann_json::nlohmann_json)
+target_compile_options(zerosee_web PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(zerosee src/main.cpp src/cli.cpp src/tcp_probe.cpp src/scanner.cpp)
+target_link_libraries(zerosee PRIVATE Threads::Threads zerosee_web)
+install(TARGETS zerosee RUNTIME DESTINATION bin)
+target_compile_features(zerosee PRIVATE cxx_std_20)
+set_target_properties(zerosee PROPERTIES CXX_EXTENSIONS OFF)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(zerosee PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME cli COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli.py $<TARGET_FILE:zerosee>)
+    add_executable(test_tcp_probe tests/test_tcp_probe.cpp src/tcp_probe.cpp)
+    target_include_directories(test_tcp_probe PRIVATE src)
+    target_compile_features(test_tcp_probe PRIVATE cxx_std_20)
+    target_compile_options(test_tcp_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(test_tcp_probe PRIVATE
+        -Wl,--wrap=socket -Wl,--wrap=close -Wl,--wrap=connect
+        -Wl,--wrap=poll -Wl,--wrap=getsockopt)
+    add_test(NAME tcp_probe COMMAND test_tcp_probe)
+    add_executable(test_scanner tests/test_scanner.cpp src/scanner.cpp)
+    target_include_directories(test_scanner PRIVATE src)
+    target_compile_features(test_scanner PRIVATE cxx_std_20)
+    target_compile_options(test_scanner PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(test_scanner PRIVATE Threads::Threads)
+    add_test(NAME scanner COMMAND test_scanner)
+    add_executable(test_web tests/test_web.cpp)
+    target_link_libraries(test_web PRIVATE zerosee_web)
+    target_compile_options(test_web PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME web_unit COMMAND test_web)
+    add_test(NAME web_cli COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_web_cli.py $<TARGET_FILE:zerosee>)
+    add_test(NAME web_integration COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_web_integration.py $<TARGET_FILE:zerosee>)
+    set_tests_properties(cli tcp_probe scanner web_unit web_cli PROPERTIES TIMEOUT 20)
+    set_tests_properties(web_integration PROPERTIES TIMEOUT 60)
+endif()
